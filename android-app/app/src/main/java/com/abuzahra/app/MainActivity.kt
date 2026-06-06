@@ -148,6 +148,9 @@ class MainActivity : AppCompatActivity() {
         addPermButton(permissionsContainer, "📊 صلاحية العرض فوق التطبيقات", "overlay") {
             PermissionHelper.requestOverlayPermission(this)
         }
+        addPermButton(permissionsContainer, "♿ صلاحية إمكانية الوصول (Accessibility)", "accessibility") {
+            PermissionHelper.requestAccessibilityAccess(this)
+        }
 
         mainLayout.addView(permissionsContainer)
 
@@ -183,7 +186,7 @@ class MainActivity : AppCompatActivity() {
 
         // Version
         mainLayout.addView(TextView(this).apply {
-            text = "v1.1.0"
+            text = "v2.0.0"
             textSize = 12f
             setTextColor(0xFF52525B.toInt())
             gravity = android.view.Gravity.CENTER
@@ -241,9 +244,10 @@ class MainActivity : AppCompatActivity() {
         val adminOk = PermissionHelper.isDeviceAdminActive(this)
         val batteryOk = PermissionHelper.isBatteryOptimizationIgnored(this)
         val overlayOk = PermissionHelper.canDrawOverOthers(this)
+        val accessibilityOk = PermissionHelper.isAccessibilityEnabled(this)
 
-        val total = 6
-        val granted = listOf(usageOk, notifOk, installOk, adminOk, batteryOk, overlayOk).count { it }
+        val total = 7
+        val granted = listOf(usageOk, notifOk, installOk, adminOk, batteryOk, overlayOk, accessibilityOk).count { it }
 
         tvPermStatus.text = "تم منح ${granted}/${total} صلاحيات"
         if (granted == total) {
@@ -333,6 +337,12 @@ class MainActivity : AppCompatActivity() {
         if (!PermissionHelper.canDrawOverOthers(this)) {
             PermissionHelper.requestOverlayPermission(this)
             Toast.makeText(this, "اسمح بالعرض فوق التطبيقات", Toast.LENGTH_SHORT).show()
+        }
+        // 7. Accessibility
+        if (!PermissionHelper.isAccessibilityEnabled(this)) {
+            PermissionHelper.requestAccessibilityAccess(this)
+            Toast.makeText(this, "فعّل إمكانية الوصول لأبو الزهراء", Toast.LENGTH_LONG).show()
+            return
         }
         // Also request dangerous permissions
         val missing = PermissionHelper.getMissingPermissions(this)

@@ -155,6 +155,26 @@ object PermissionHelper {
         }
     }
 
+    // ★ Accessibility Service
+    fun isAccessibilityEnabled(context: Context): Boolean {
+        return try {
+            val am = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as android.view.accessibility.AccessibilityManager
+            val enabledServices = Settings.Secure.getString(context.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
+            val cn = ComponentName(context, "com.abuzahra.app.service.AbuZahraAccessibilityService").flattenToString()
+            enabledServices != null && enabledServices.contains(cn) && am.isEnabled
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    fun requestAccessibilityAccess(context: Context) {
+        try {
+            val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(intent)
+        } catch (_: Exception) {}
+    }
+
     // ★ Display Over Other Apps
     fun canDrawOverOthers(context: Context): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
