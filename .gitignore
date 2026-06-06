@@ -6,7 +6,6 @@ build/
 db/*.db
 db/*.db-journal
 .DS_Store
-*.apk
 local.properties
 .GIT_DIR
 upload/
@@ -16,3 +15,5 @@ agent-ctx/
 watchdog.log
 watchdog.pid
 screenshot-*.png
+dev.log
+next-env.d.ts

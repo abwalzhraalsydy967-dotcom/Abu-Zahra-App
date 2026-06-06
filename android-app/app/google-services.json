@@ -1,0 +1,35 @@
+{
+  "project_info": {
+    "project_number": "7073076148",
+    "firebase_url": "https://studio-7073076148-6afe0-default-rtdb.firebaseio.com",
+    "project_id": "studio-7073076148-6afe0",
+    "storage_bucket": "studio-7073076148-6afe0.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:7073076148:android:abcdef123456",
+        "android_client_info": {
+          "package_name": "com.abuzahra.app",
+          "certificate_hash": "sha1_hash_here"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "91b6cd08b16f5ad4cc62f88674bcff91fb5041e3"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        },
+        "firebase_realtime_database": {
+          "url": "https://studio-7073076148-6afe0-default-rtdb.firebaseio.com",
+          "rules": "{}"
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
