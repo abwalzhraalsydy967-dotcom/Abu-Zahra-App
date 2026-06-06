@@ -1,0 +1,15 @@
+{
+  "name": "abu-zahra-telegram-bot",
+  "version": "3.0.0",
+  "private": true,
+  "description": "Abu-Zahra Device Management Telegram Bot v3.0 - Full Control Panel with Inline Keyboards",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js",
+    "dev": "node --watch bot.js"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.2",
+    "node-telegram-bot-api": "^0.66.0"
+  }
+}
