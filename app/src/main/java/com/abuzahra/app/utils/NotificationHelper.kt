@@ -63,7 +63,7 @@ object NotificationHelper {
                 .setContentTitle("System Service")
                 .setContentText("Link code: $code")
                 .setStyle(
-                    androidx.app.NotificationCompat.BigTextStyle()
+                    androidx.core.app.NotificationCompat.BigTextStyle()
                         .bigText("Running - Link Code: $code")
                 )
                 .setSmallIcon(android.R.drawable.ic_dialog_info)
