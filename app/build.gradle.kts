@@ -10,21 +10,32 @@ android {
 
     defaultConfig {
         applicationId = "com.abuzahra.app"
-        minSdk = 26
+        minSdk = 24
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.1"
+    }
 
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    signingConfigs {
+        create("release") {
+            storeFile = file("abuzahra-release.jks")
+            storePassword = "abuzahra2024"
+            keyAlias = "abuzahra"
+            keyPassword = "abuzahra2024"
+        }
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = true
+            isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            signingConfig = signingConfigs.getByName("release")
+        }
+        debug {
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 
@@ -50,7 +61,6 @@ dependencies {
     implementation("com.google.android.material:material:1.11.0")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     implementation("androidx.cardview:cardview:1.0.0")
-    implementation("androidx.cardview:cardview:1.0.0")
 
     // Firebase
     implementation(platform("com.google.firebase:firebase-bom:32.7.0"))
@@ -67,7 +77,4 @@ dependencies {
     // Lifecycle
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
     implementation("androidx.lifecycle:lifecycle-service:2.7.0")
-
-    // Preferences
-    implementation("androidx.datastore:datastore-preferences:1.0.0")
 }

