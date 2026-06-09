@@ -1,0 +1,90 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model AdminUser {
+  id        String   @id @default(cuid())
+  username  String   @unique
+  password  String
+  role      String   @default("admin")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Device {
+  id         String       @id @default(cuid())
+  firebaseId String       @unique
+  name       String       @default("")
+  model      String       @default("")
+  brand      String       @default("")
+  os         String       @default("")
+  battery    Int          @default(0)
+  network    String       @default("")
+  location   String       @default("")
+  ip         String       @default("")
+  active     Boolean      @default(false)
+  lastSeen   DateTime     @default(now())
+  token      String       @default("")
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+  commands   CommandLog[]
+  data       DeviceData[]
+}
+
+model CommandLog {
+  id        String   @id @default(cuid())
+  deviceId  String
+  device    Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  command   String
+  params    String   @default("{}")
+  status    String   @default("pending")
+  result    String   @default("")
+  source    String   @default("web")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model DeviceData {
+  id        String   @id @default(cuid())
+  deviceId  String
+  device    Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  dataType  String
+  data      String   @default("[]")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model LinkCode {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+}
+
+model SystemSettings {
+  id               String   @id @default("main")
+  adminChatId      String   @default("7344776596")
+  botToken         String   @default("")
+  syncInterval     Int      @default(60)
+  locationInterval Int      @default(300)
+  language         String   @default("ar")
+  notifications    Boolean  @default(true)
+  autoLocation     Boolean  @default(true)
+  autoSync         Boolean  @default(true)
+  firebaseProject  String   @default("studio-7073076148-6afe0")
+  updatedAt        DateTime @updatedAt
+}
+
+model EventLog {
+  id        String   @id @default(cuid())
+  type      String
+  message   String
+  deviceId  String?
+  createdAt DateTime @default(now())
+}
